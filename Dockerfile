@@ -1,5 +1,6 @@
 # ==============================================================================
 # Production Dockerfile — Autonomous Research Agent
+# Fix: Pre-create /app/data so SQLite can open its database on first Docker run
 # Multi-stage build for minimal image size and enhanced security
 # ==============================================================================
 
@@ -32,7 +33,11 @@ COPY --from=builder /install /usr/local
 # Copy application source code
 COPY . /app
 
-# Set ownership to non-root user
+# Pre-create the data directory where SQLite database will be persisted.
+# This ensures the directory exists even before the Docker volume is mounted.
+RUN mkdir -p /app/data
+
+# Set ownership to non-root user (includes /app/data)
 RUN chown -R appuser:appgroup /app
 
 # Environment variables

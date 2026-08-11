@@ -36,6 +36,9 @@ def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
     if not os.path.isabs(db_path):
         db_path = os.path.join(BASE_DIR, db_path)
 
+    # Ensure the parent directory exists (critical for Docker volumes like /app/data)
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+
     conn = sqlite3.connect(db_path)
     # Enable dict factory to easily map rows to dicts
     conn.row_factory = sqlite3.Row
