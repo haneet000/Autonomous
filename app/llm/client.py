@@ -271,6 +271,19 @@ class GroqClient(BaseLLM):
         try:
             response = self._client.chat.completions.create(**kwargs)
         except Exception as exc:
+            # Fallback recovery for Groq tool_use_failed errors
+            recovered_calls = self._recover_failed_generation(exc)
+            if recovered_calls:
+                latency_ms = (time.perf_counter() - start) * 1000
+                logger.info(f"Successfully recovered {len(recovered_calls)} tool call(s) from Groq failed_generation error.")
+                return LLMResponse(
+                    content=None,
+                    tool_calls=recovered_calls,
+                    usage=None,
+                    model=self._model,
+                    provider=self.PROVIDER_NAME,
+                    latency_ms=round(latency_ms, 2),
+                )
             self._handle_groq_error(exc)
 
         latency_ms = (time.perf_counter() - start) * 1000
@@ -356,6 +369,56 @@ class GroqClient(BaseLLM):
             f"tool_calls={len(tool_calls) if tool_calls else 0}"
         )
         return llm_response
+
+    @staticmethod
+    def _recover_failed_generation(exc: Exception) -> Optional[List[ToolCall]]:
+        """
+        Attempt to parse tool calls from Groq's failed_generation error message.
+
+        Llama models on Groq sometimes generate XML tags like `<function=name{...}</function>`
+        which trigger Groq's server-side tool_use_failed error. This method recovers
+        the structured ToolCall objects from the error payload.
+        """
+        import re
+        import uuid
+
+        failed_gen = ""
+        body = getattr(exc, "body", None) or {}
+        if isinstance(body, dict):
+            err_info = body.get("error", {})
+            if isinstance(err_info, dict):
+                failed_gen = err_info.get("failed_generation", "")
+
+        if not failed_gen:
+            exc_str = str(exc)
+            match = re.search(r"['\"]failed_generation['\"]:\s*['\"](.*?)['\"]", exc_str, re.DOTALL)
+            if match:
+                failed_gen = match.group(1).replace("\\n", "\n").replace('\\"', '"')
+
+        if not failed_gen:
+            return None
+
+        # Pattern 1: <function=name{"arg": "val"}</function>
+        matches = re.findall(r'<function=([a-zA-Z0-9_-]+)\s*(\{.*?\})</function>', failed_gen, re.DOTALL)
+        if not matches:
+            # Pattern 2: <function=name>{"arg": "val"}</function>
+            matches = re.findall(r'<function=([a-zA-Z0-9_-]+)>(\{.*?\})</function>', failed_gen, re.DOTALL)
+        if not matches:
+            # Pattern 3: <function=name{"arg": "val"}
+            matches = re.findall(r'<function=([a-zA-Z0-9_-]+)\s*(\{.*?\})', failed_gen, re.DOTALL)
+
+        if matches:
+            tool_calls = []
+            for name, args_str in matches:
+                tool_calls.append(
+                    ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name=name.strip(),
+                        arguments=args_str.strip(),
+                    )
+                )
+            return tool_calls
+        return None
 
     def _handle_groq_error(self, exc: Exception) -> None:
         """Map Groq SDK exceptions to our custom hierarchy and re-raise."""
@@ -453,46 +516,41 @@ class GeminiClient(BaseLLM):
         # Separate system instruction from conversation messages
         system_instruction, contents = self._build_contents(messages)
 
-        # Build generation config
-        config = types.GenerateContentConfig(
-            temperature=temp,
-            maxOutputTokens=tokens,
-        )
-        if system_instruction:
-            config.systemInstruction = system_instruction
-
-        # Convert OpenAI-style tools to Gemini types
+        # Convert OpenAI-style tools to Gemini Tool objects
+        gemini_tools = None
         if tools:
-            gemini_tools = []
             function_declarations = []
             for tool in tools:
                 if tool.get("type") == "function" and "function" in tool:
                     func = tool["function"]
-                    
-                    # Convert parameter type strings to uppercase as required by Google SDK Pydantic models
+
+                    # Convert parameter type strings to uppercase (Google SDK requirement)
                     def _uppercase_types(schema: Any) -> Any:
                         if isinstance(schema, dict):
-                            new_schema = {}
-                            for k, v in schema.items():
-                                if k == "type" and isinstance(v, str):
-                                    new_schema[k] = v.upper()
-                                else:
-                                    new_schema[k] = _uppercase_types(v)
-                            return new_schema
+                            return {
+                                k: (v.upper() if k == "type" and isinstance(v, str) else _uppercase_types(v))
+                                for k, v in schema.items()
+                            }
                         elif isinstance(schema, list):
                             return [_uppercase_types(item) for item in schema]
                         return schema
-                    
-                    decl = {
+
+                    function_declarations.append({
                         "name": func["name"],
                         "description": func.get("description", ""),
                         "parameters": _uppercase_types(func.get("parameters", {})),
-                    }
-                    function_declarations.append(decl)
-            
+                    })
+
             if function_declarations:
-                gemini_tools.append(types.Tool(function_declarations=function_declarations))
-                config.tools = gemini_tools
+                gemini_tools = [types.Tool(function_declarations=function_declarations)]
+
+        # Build generation config — pass all fields in constructor (SDK 2.x is immutable)
+        config = types.GenerateContentConfig(
+            temperature=temp,
+            max_output_tokens=tokens,
+            system_instruction=system_instruction or None,
+            tools=gemini_tools,
+        )
 
         logger.info(
             f"Gemini request: model={self._model}, messages={len(messages)}, "

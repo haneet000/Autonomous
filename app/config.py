@@ -37,8 +37,8 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     llm_provider: str = Field(default="groq", env="LLM_PROVIDER")
-    default_model: str = Field(default="llama-3.3-70b-versatile", env="DEFAULT_MODEL")
-    gemini_model: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")
+    default_model: str = Field(default="llama-3.1-8b-instant", env="DEFAULT_MODEL")
+    gemini_model: str = Field(default="gemini-2.5-flash", env="GEMINI_MODEL")
     temperature: float = Field(default=0.0, env="TEMPERATURE")
     max_tokens: int = Field(default=4096, env="MAX_TOKENS")
     max_retries: int = Field(default=3, env="MAX_RETRIES")

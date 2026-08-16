@@ -46,42 +46,56 @@ def search_web(query: str, max_results: int = 5) -> List[SearchResult]:
         return []
 
     results: List[SearchResult] = []
+    
+    # 1. Try DuckDuckGo Search (HTML backend first for stability)
     try:
-        # DDGS client is a context manager that handles connection pools and clean shutdown
         with DDGS() as ddgs:
-            # text search retrieves standard search index results
-            response = ddgs.text(query, max_results=max_results)
-            
-            # Fallback to HTML backend if default backend returns empty (common in cloud environments)
+            response = list(ddgs.text(query, backend="html", max_results=max_results))
             if not response:
-                logger.info("Default backend returned no results. Trying HTML backend fallback...")
-                response = ddgs.text(query, backend="html", max_results=max_results)
-            
+                response = list(ddgs.text(query, backend="lite", max_results=max_results))
             if not response:
-                logger.info(f"No results found for query: '{query}' with any backend.")
-                return []
+                response = list(ddgs.text(query, max_results=max_results))
 
             for item in response:
-                # duckduckgo-search returns dicts containing:
-                # - 'title': title of the result
-                # - 'href': URL of the result
-                # - 'body': text snippet of the result
                 title = item.get("title", "")
                 url = item.get("href", "")
                 snippet = item.get("body", "")
+                if url:
+                    results.append(SearchResult(title=title, url=url, snippet=snippet))
+    except Exception as ddg_err:
+        logger.warning(f"DuckDuckGo search encountered error: {ddg_err}. Falling back to Wikipedia API...")
 
-                # Validate data schema using our Pydantic model
-                result_item = SearchResult(
-                    title=title,
-                    url=url,
-                    snippet=snippet
-                )
-                results.append(result_item)
-                
-        logger.info(f"Successfully retrieved {len(results)} search results.")
-        return results
+    # 2. Fallback to Wikipedia API if search returned no results
+    if not results:
+        try:
+            import requests
+            import re
+            logger.info(f"Using Wikipedia search fallback for query: '{query}'")
+            resp = requests.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "format": "json",
+                    "utf8": 1
+                },
+                headers={"User-Agent": "AutonomousResearchAgent/1.0 (https://github.com/autonomous-agent)"},
+                timeout=8
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("query", {}).get("search", [])[:max_results]:
+                    title = item.get("title", "")
+                    clean_snippet = re.sub(r"<[^>]+>", "", item.get("snippet", ""))
+                    page_url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+                    results.append(SearchResult(title=title, url=page_url, snippet=clean_snippet))
+        except Exception as wiki_err:
+            logger.warning(f"Wikipedia fallback search error: {wiki_err}")
 
-    except Exception as e:
-        logger.error(f"Failed to execute DuckDuckGo search: {str(e)}", exc_info=True)
-        # Return empty list in case of failure to maintain agent loop stability (graceful failure)
+    if not results:
+        logger.info(f"No results found for query: '{query}' with any provider.")
         return []
+
+    logger.info(f"Successfully retrieved {len(results)} search results.")
+    return results

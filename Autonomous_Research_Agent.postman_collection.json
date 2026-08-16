@@ -1,0 +1,253 @@
+{
+	"info": {
+		"_postman_id": "autonomous-research-agent-collection",
+		"name": "🤖 Autonomous Research Agent",
+		"description": "Complete API collection for the Autonomous Research Agent.\n\n## How to use:\n1. Import this collection into Postman\n2. Set the `base_url` variable to `http://localhost:8000`\n3. Use **Step 1** → Submit a research query\n4. Copy the `job_id` from the response\n5. Use **Step 2** → Poll status with that `job_id`\n6. Use **Step 3** → Download final report\n\n## Architecture:\n- POST /api/v1/research → Starts async research (returns immediately)\n- GET  /api/v1/research/{job_id} → Poll progress & results\n- GET  /api/v1/research/{job_id}/report → Get final Markdown report\n- GET  /api/v1/jobs → List all past jobs\n- GET  /api/v1/health → Server health check",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string",
+			"description": "Base URL of the running server. Change port if needed."
+		},
+		{
+			"key": "job_id",
+			"value": "paste-job-id-here",
+			"type": "string",
+			"description": "Job ID returned from POST /api/v1/research. Update this after submitting a job."
+		}
+	],
+	"item": [
+		{
+			"name": "🏥 Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/health",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "health"]
+				},
+				"description": "## Health Check\n\nVerifies that the server is running and the SQLite database is reachable.\n\n### Response Fields:\n| Field | Description |\n|---|---|\n| `status` | Always `ok` if server is up |\n| `database` | `connected` or `disconnected` |\n| `default_provider` | LLM provider configured in .env (`groq` or `gemini`) |\n| `timestamp` | Current server UTC time |\n\n### Use this to:\n- Confirm the server started correctly\n- Check database connectivity\n- Verify which LLM provider is active"
+			},
+			"response": [
+				{
+					"name": "200 OK — Server Healthy",
+					"originalRequest": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/api/v1/health"
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"status\": \"ok\",\n  \"database\": \"connected\",\n  \"default_provider\": \"groq\",\n  \"timestamp\": \"2026-08-16T11:00:00.000000\"\n}"
+				}
+			]
+		},
+		{
+			"name": "🚀 Step 1 — Submit Research Query",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"if (jsonData.job_id) {",
+							"    pm.collectionVariables.set('job_id', jsonData.job_id);",
+							"    console.log('job_id saved:', jsonData.job_id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"query\": \"Latest advancements in quantum computing 2024\",\n  \"provider\": \"groq\",\n  \"max_iterations\": 5\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/research",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "research"]
+				},
+				"description": "## Submit Research Query (Async)\n\nSubmits a research topic to the agent. Returns immediately (202 Accepted) and runs in the background.\n\n### Request Body:\n| Field | Type | Required | Description |\n|---|---|---|---|\n| `query` | string | Yes | Research question (3-500 chars) |\n| `provider` | string | No | `groq` or `gemini` (overrides .env) |\n| `max_iterations` | int | No | Max ReAct loop steps (1-50, default: 10) |\n\n### Response (202 Accepted):\n| Field | Description |\n|---|---|\n| `job_id` | UUID — use this for all follow-up requests |\n| `query` | Echoed back research question |\n| `status` | Always `running` at this point |\n| `message` | Confirmation message |\n| `created_at` | Timestamp of job creation |\n\nNOTE: The test script auto-saves `job_id` to the collection variable."
+			},
+			"response": [
+				{
+					"name": "202 Accepted — Job Started",
+					"originalRequest": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"Latest advancements in quantum computing 2024\",\n  \"provider\": \"groq\",\n  \"max_iterations\": 5\n}"
+						},
+						"url": {"raw": "{{base_url}}/api/v1/research"}
+					},
+					"status": "Accepted",
+					"code": 202,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"job_id\": \"c6990b83-24c8-4a3e-a329-73549d2c0db4\",\n  \"query\": \"Latest advancements in quantum computing 2024\",\n  \"status\": \"running\",\n  \"message\": \"Research job submitted successfully and executing in the background.\",\n  \"created_at\": \"2026-08-16T11:01:00.000000\"\n}"
+				}
+			]
+		},
+		{
+			"name": "📊 Step 2 — Poll Job Status and Results",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/research/{{job_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "research", "{{job_id}}"]
+				},
+				"description": "## Poll Research Job Status and Results\n\nKeep calling this endpoint until `success` is `true` or `false`.\n\n### Response Fields:\n| Field | Description |\n|---|---|\n| `job_id` | The job UUID |\n| `query` | Original research question |\n| `success` | `null` = still running, `true` = done, `false` = failed |\n| `steps` | Array of ReAct loop steps (Thought, Action, Observation) |\n| `notes` | Factual notes extracted from web pages with source URLs |\n| `visited_urls` | All web pages the agent scraped |\n| `final_summary` | Full synthesized Markdown report (populated when done) |\n| `total_tokens` | Token usage count |\n| `total_latency_ms` | Total LLM API latency in milliseconds |\n\n### When to stop polling:\n- `success = true` — Research complete, report ready\n- `success = false` — Research failed\n\n### Errors:\n- `404 Not Found` — Invalid or wrong `job_id`"
+			},
+			"response": [
+				{
+					"name": "200 OK — Job Still Running",
+					"originalRequest": {
+						"method": "GET",
+						"url": {"raw": "{{base_url}}/api/v1/research/{{job_id}}"}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"job_id\": \"c6990b83-24c8-4a3e-a329-73549d2c0db4\",\n  \"query\": \"Latest advancements in quantum computing 2024\",\n  \"success\": null,\n  \"steps\": [\n    {\n      \"step_number\": 1,\n      \"thought\": \"I need to search for recent quantum computing news.\",\n      \"action\": \"search\",\n      \"action_input\": \"quantum computing advancements 2024\",\n      \"observation\": \"Found 5 relevant results.\"\n    }\n  ],\n  \"notes\": [],\n  \"visited_urls\": [],\n  \"final_summary\": null,\n  \"total_tokens\": 450,\n  \"total_latency_ms\": 1200.5\n}"
+				},
+				{
+					"name": "200 OK — Job Completed",
+					"originalRequest": {
+						"method": "GET",
+						"url": {"raw": "{{base_url}}/api/v1/research/{{job_id}}"}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"job_id\": \"c6990b83-24c8-4a3e-a329-73549d2c0db4\",\n  \"query\": \"Latest advancements in quantum computing 2024\",\n  \"success\": true,\n  \"steps\": [],\n  \"notes\": [\n    {\n      \"fact\": \"IBM unveiled a 1000+ qubit processor in 2023.\",\n      \"source_url\": \"https://example.com/ibm-quantum\"\n    }\n  ],\n  \"visited_urls\": [\"https://example.com/ibm-quantum\"],\n  \"final_summary\": \"# Research Report\\n\\n## Executive Summary\\n...\",\n  \"total_tokens\": 8500,\n  \"total_latency_ms\": 15400.0\n}"
+				},
+				{
+					"name": "404 Not Found — Invalid Job ID",
+					"originalRequest": {
+						"method": "GET",
+						"url": {"raw": "{{base_url}}/api/v1/research/invalid-id"}
+					},
+					"status": "Not Found",
+					"code": 404,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"detail\": \"Research job with ID 'invalid-id' was not found.\"\n}"
+				}
+			]
+		},
+		{
+			"name": "📄 Step 3 — Download Markdown Report",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/research/{{job_id}}/report",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "research", "{{job_id}}", "report"]
+				},
+				"description": "## Export Synthesized Markdown Report\n\nReturns the full research report as raw Markdown text.\n\n### Report Structure:\n```\n# Research Report: [Your Query]\n\n## Executive Summary\n...\n\n## Key Findings\n- Finding 1 [1]\n- Finding 2 [2]\n\n## Detailed Analysis\n...\n\n## Sources and References\n[1] https://source-url-1.com\n[2] https://source-url-2.com\n```\n\n### Use this to:\n- Copy the final polished report\n- Save it as a `.md` file\n- Feed it into a document or CMS\n\n### Note:\n- Only meaningful after job `success = true`"
+			},
+			"response": [
+				{
+					"name": "200 OK — Markdown Report",
+					"originalRequest": {
+						"method": "GET",
+						"url": {"raw": "{{base_url}}/api/v1/research/{{job_id}}/report"}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "text",
+					"header": [{"key": "Content-Type", "value": "text/markdown"}],
+					"body": "# Research Report: Latest advancements in quantum computing 2024\n\n## Executive Summary\nQuantum computing saw major breakthroughs in 2024...\n\n## Key Findings\n- IBM released a 1000+ qubit processor [1]\n- Google achieved quantum supremacy milestone [2]\n\n## Detailed Analysis\n...\n\n## Sources and References\n[1] https://ibm.com/quantum-computing\n[2] https://blog.google/technology/ai/google-quantum/"
+				}
+			]
+		},
+		{
+			"name": "📋 List All Research Jobs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/jobs?limit=20&offset=0",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "jobs"],
+					"query": [
+						{
+							"key": "limit",
+							"value": "20",
+							"description": "Max number of jobs to return (1-100, default: 20)"
+						},
+						{
+							"key": "offset",
+							"value": "0",
+							"description": "Pagination offset (skip N jobs, default: 0)"
+						}
+					]
+				},
+				"description": "## List Recent Research Jobs\n\nReturns a paginated history of all submitted research jobs.\n\n### Query Parameters:\n| Param | Default | Description |\n|---|---|---|\n| `limit` | 20 | Number of jobs to return (max 100) |\n| `offset` | 0 | Skip N jobs (for pagination) |\n\n### Response Fields:\n| Field | Description |\n|---|---|\n| `total` | Number of jobs returned in this batch |\n| `jobs` | Array of job summaries |\n| `jobs[].job_id` | UUID of the job |\n| `jobs[].query` | Research question |\n| `jobs[].success` | `true` = done, `false` = failed |\n| `jobs[].total_tokens` | Tokens consumed |\n| `jobs[].total_latency_ms` | Total LLM latency |\n| `jobs[].created_at` | ISO timestamp |\n\n### Use this to:\n- Review all past research queries\n- Find old job IDs\n- Monitor system usage"
+			},
+			"response": [
+				{
+					"name": "200 OK — Job List",
+					"originalRequest": {
+						"method": "GET",
+						"url": {"raw": "{{base_url}}/api/v1/jobs?limit=20&offset=0"}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"body": "{\n  \"total\": 2,\n  \"jobs\": [\n    {\n      \"job_id\": \"c6990b83-24c8-4a3e-a329-73549d2c0db4\",\n      \"query\": \"Latest advancements in quantum computing 2024\",\n      \"success\": true,\n      \"total_tokens\": 8500,\n      \"total_latency_ms\": 15400.0,\n      \"created_at\": \"2026-08-16T11:01:00\"\n    },\n    {\n      \"job_id\": \"a1b2c3d4-0000-0000-0000-000000000001\",\n      \"query\": \"Impact of AI on medical diagnostics\",\n      \"success\": true,\n      \"total_tokens\": 6200,\n      \"total_latency_ms\": 12000.0,\n      \"created_at\": \"2026-08-16T10:00:00\"\n    }\n  ]\n}"
+				}
+			]
+		},
+		{
+			"name": "🔬 Submit Query Using Gemini Provider",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"query\": \"Impact of Artificial Intelligence on Medical Diagnostics\",\n  \"provider\": \"gemini\",\n  \"max_iterations\": 8\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/research",
+					"host": ["{{base_url}}"],
+					"path": ["api", "v1", "research"]
+				},
+				"description": "Same as Step 1 but forces the Gemini provider instead of Groq.\n\nUseful for:\n- Testing the fallback provider\n- Comparing output quality between providers\n- When Groq rate limits are hit"
+			},
+			"response": []
+		}
+	]
+}

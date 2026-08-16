@@ -169,8 +169,9 @@ class ReActAgent:
         # Ensure database and tables exist
         init_db()
 
-        # Create the initial job record in SQLite DB
-        repository.create_job(self.current_job_id, query)
+        # NOTE: The job record was already created by the API route before
+        # dispatching this background task. Do NOT call create_job() here again
+        # or it will cause a UNIQUE constraint violation on research_jobs.job_id.
 
         # Reset session state
         self.notes = []
